@@ -6,7 +6,11 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import sys, os, gc, optparse, logging, time, collections, importlib
 import util, reactor, queuelogger, msgproto
-import gcode, configfile, pins, mcu, toolhead, webhooks
+import gcode, configfile, pins, mcu, toolhead, webhooks, configparser
+
+home = os.path.expanduser("~/")
+printer_data_config = os.path.join(home, "printer_data", "config")
+protection_config = os.path.join(printer_data_config, "protect.conf")
 
 message_ready = "Printer is ready"
 
@@ -60,6 +64,21 @@ class Printer:
         self.run_result = None
         self.event_handlers = {}
         self.objects = collections.OrderedDict()
+        # new
+        self.enableProbe = False
+        self.lastProbe = 0
+        self.lastProbetime = time.perf_counter()
+        self.pertime = time.perf_counter()
+        self.prtime = time.perf_counter()
+        self.protect = False
+        #add for cxm
+        config = configparser.ConfigParser()
+        config.read(protection_config)
+        if 'PrinterStatus' in config.sections():
+            self.protection = config.getboolean('PrinterStatus', 'status')
+        else:
+            self.protection = None
+        #self.protection = True
         # Init printer components that must be setup prior to config
         for m in [gcode, webhooks]:
             m.add_early_printer_objects(self)

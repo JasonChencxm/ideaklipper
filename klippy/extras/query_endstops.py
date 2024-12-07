@@ -3,7 +3,7 @@
 # Copyright (C) 2018-2019  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-
+import time
 class QueryEndstops:
     def __init__(self, config):
         self.printer = config.get_printer()
@@ -39,6 +39,10 @@ class QueryEndstops:
         # Report results
         msg = " ".join(["%s:%s" % (name, ["open", "TRIGGERED"][not not t])
                         for name, t in self.last_state])
+        reactor = self.printer.get_reactor()
+        mtime = reactor.monotonic()
+
+        msg += str(print_time)+",per:"+str(time.perf_counter())+",mon:"+str(mtime)
         gcmd.respond_raw(msg)
 
 def load_config(config):

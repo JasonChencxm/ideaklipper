@@ -294,6 +294,7 @@ class MCU_endstop:
         self._mcu.register_config_callback(self._build_config)
         self._rest_ticks = 0
         self._dispatch = TriggerDispatch(mcu)
+        self.protect = False
     def get_mcu(self):
         return self._mcu
     def add_stepper(self, stepper):
@@ -343,11 +344,23 @@ class MCU_endstop:
         params = self._query_cmd.send([self._oid])
         next_clock = self._mcu.clock32_to_clock64(params['next_clock'])
         return self._mcu.clock_to_print_time(next_clock - self._rest_ticks)
-    def query_endstop(self, print_time):
-        clock = self._mcu.print_time_to_clock(print_time)
+    def query_endstopn(self,print_time):
+        clock = self._mcu.get_mclock()
         if self._mcu.is_fileoutput():
             return 0
         params = self._query_cmd.send([self._oid], minclock=clock)
+        return params['pin_value'] ^ self._invert
+
+    def query_endstop(self, print_time):
+        if self.protect:
+            return 0
+        self.protect = True
+        clock = self._mcu.print_time_to_clock(print_time)
+        if self._mcu.is_fileoutput():
+            self.protect = False
+            return 0
+        params = self._query_cmd.send([self._oid], minclock=clock)
+        self.protect = False
         return params['pin_value'] ^ self._invert
 
 class MCU_digital_out:
@@ -890,6 +903,8 @@ class MCU:
         return self._serial.get_msgparser().get_constants()
     def get_constant_float(self, name):
         return self._serial.get_msgparser().get_constant_float(name)
+    def get_mclock(self):
+        return self._clocksync.get_mclock()
     def print_time_to_clock(self, print_time):
         return self._clocksync.print_time_to_clock(print_time)
     def clock_to_print_time(self, clock):

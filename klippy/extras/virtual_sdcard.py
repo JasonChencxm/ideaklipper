@@ -4,6 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import os, sys, logging, io
+import time
 
 VALID_GCODE_EXTS = ['gcode', 'g', 'gco']
 
@@ -235,7 +236,10 @@ class VirtualSD:
         gcode_mutex = self.gcode.get_mutex()
         partial_input = ""
         lines = []
+        lastEn = False
         error_message = None
+        starttoprotect = False
+        # self.printer.send_event("protect:start")
         while not self.must_pause_work:
             if not lines:
                 # Read more data
@@ -264,13 +268,47 @@ class VirtualSD:
             # Dispatch command
             self.cmd_from_sd = True
             line = lines.pop()
+            line = line.replace('\r',' ')
             if sys.version_info.major >= 3:
                 next_file_position = self.file_position + len(line.encode()) + 1
             else:
                 next_file_position = self.file_position + len(line) + 1
             self.next_file_position = next_file_position
             try:
+                parts = line.split(" ")
+                self.printer.enableProbe = False
+                # CurrentEn=False
+                IsG28 = False
+                for part in parts:
+                    if "G1" in part or "G0" in part:
+                        self.printer.enableProbe = True and self.printer.protect
+                        # CurrentEn = True
+                    if "G28" in part:
+                        self.printer.enableProbe = False
+                        # self.gcode.respond_raw("Enter G28:%s:%s"%(line,str(self.printer.enableProbe)))
+                        if "G28 Y" in line:
+                            self.printer.protect = True
+                        IsG28 = True
+                    # if "G28" in part:
+                    #     reactor = self.printer.get_reactor()
+                    #     c_time = reactor.monotonic()
+                    #     while reactor.monotonic()-c_time>0.1:
+                    #         self.printer.enableProbe = False
+                # if CurrentEn == False and lastEn:
+                #     self.printer.send_event("protect:end")
+                # if CurrentEn and lastEn == False:
+                #     self.printer.send_event("protect:start")
+                delaytime = time.perf_counter()
+                if IsG28:
+                    while time.perf_counter() - delaytime < 0.1:
+                        IsG28 = True
+                    # self.gcode.respond_raw("Wait for G28 before")
+                # lastEn = CurrentEn
                 self.gcode.run_script(line)
+                if IsG28:
+                    while time.perf_counter() - delaytime < 0.1:
+                        IsG28 = True
+                    # self.gcode.respond_raw("Wait for G28 after")
             except self.gcode.error as e:
                 error_message = str(e)
                 try:
@@ -293,6 +331,8 @@ class VirtualSD:
                     return self.reactor.NEVER
                 lines = []
                 partial_input = ""
+        self.printer.enableProbe = False
+        # self.printer.send_event("protect:end")
         logging.info("Exiting SD card print (position %d)", self.file_position)
         self.work_timer = None
         self.cmd_from_sd = False

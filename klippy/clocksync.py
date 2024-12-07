@@ -125,6 +125,9 @@ class ClockSync:
     def clock_to_print_time(self, clock):
         return clock / self.mcu_freq
     # system time conversions
+    def get_mclock(self):
+        sample_time, clock, freq = self.clock_est
+        return int(clock + 0.001*freq)
     def get_clock(self, eventtime):
         sample_time, clock, freq = self.clock_est
         return int(clock + (eventtime - sample_time) * freq)

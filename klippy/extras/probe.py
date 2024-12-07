@@ -75,6 +75,161 @@ class PrinterProbe:
         self.gcode.register_command('Z_OFFSET_APPLY_PROBE',
                                     self.cmd_Z_OFFSET_APPLY_PROBE,
                                     desc=self.cmd_Z_OFFSET_APPLY_PROBE_help)
+        self.printer.register_event_handler("protect:start",
+                                            self._startprotect)
+        self.printer.register_event_handler("protect:end",
+                                            self._endprotect)
+        reactor = self.printer.get_reactor()
+        curtime = reactor.monotonic()
+        self.counter = curtime
+        self.counter1 = curtime
+        self.protect = False
+        # self.toolhead = self.printer.lookup_object('toolhead')
+        self.check_timer = reactor.register_timer(self._do_periodic_check_y,
+                                                  curtime + .01)
+        self.hd = None
+        #add for cxm
+        self.gcode.register_command(
+            "SET_PROTECT_ON", self.cmd_SET_PROTECT_ON,
+            desc=self.cmd_SET_PROTECT_ON_help)
+        self.gcode.register_command(
+            "SET_PROTECT_OFF", self.cmd_SET_PROTECT_OFF,
+            desc=self.cmd_SET_PROTECT_OFF_help)
+
+
+    def _endprotect(self):
+        self.protect = False
+    def _startprotect(self):
+        self.protect = True
+
+    startProbe = 0
+    def _do_periodic_check_y(self, eventtime):
+        lowlimit = 0.0425
+        highlimit = 0.0575
+        currentEbdiag = self.printer.enableProbe
+        print_time1 = 0
+        if self.hd is None and currentEbdiag:
+            self.hd =self.printer.lookup_object('toolhead')
+        if self.hd and currentEbdiag:
+            try:
+                self.printer.prtime = self.hd.get_last_move_time()
+                self.protect = False
+            except:
+                self.protect = True
+        reactor = self.printer.get_reactor()
+        print_time1 = reactor.monotonic()
+        headertime = self.printer.prtime
+        abstime = abs(self.printer.prtime - print_time1)
+        if abs(abstime)<7:
+            print_time =self.printer.prtime - 2.693242188
+        else:
+            print_time =self.printer.prtime - 2.493242188
+
+        try:
+            if currentEbdiag and not self.protect and self.printer.protection:
+                res = 0
+                try:
+                    res = self.mcu_probe.query_endstop(print_time + 0.0001)
+                    # res = self.mcu_probe.query_endstopn(print_time)
+                except:
+                    res = 0
+                if print_time1 - self.counter1 > 5:
+                    #self.gcode.respond_info("EnterDiag:%s,%s,%s,head:%s,end:%s" % (str(currentEbdiag),str(print_time),str(time.perf_counter()),str(self.printer.prtime),str(res)))
+                    self.counter1 = print_time1
+
+                if res and not self.printer.lastProbe and self.startProbe==0:
+                    # self.gcode.respond_info("get es:%s" %(str(res)))
+                    self.printer.lastProbetime = time.perf_counter()
+                    self.startProbe = 1
+                if not res and self.printer.lastProbe and self.startProbe==1:
+                    ctime = time.perf_counter()
+                    diftime = ctime - self.printer.lastProbetime
+                    if diftime >= lowlimit and diftime <= highlimit:
+                        self.startProbe = 2
+                    else:
+                        self.startProbe = 0
+                    self.printer.lastProbetime = ctime
+                if res and not self.printer.lastProbe and self.startProbe==2:
+                    ctime = time.perf_counter()
+                    diftime = ctime - self.printer.lastProbetime
+                    #self.gcode.respond_info("2.get es:%s,diftime:%s" %(str(res),str(diftime)))
+                    if diftime >= lowlimit and diftime <= highlimit:
+                        self.startProbe = 3
+                    else:
+                        self.startProbe = 0
+                    self.printer.lastProbetime = ctime
+                if not res and self.printer.lastProbe and self.startProbe==3:
+                    ctime = time.perf_counter()
+                    diftime = ctime - self.printer.lastProbetime
+                    #self.gcode.respond_info("3.get es:%s,diftime:%s" %(str(res),str(diftime)))
+                    if diftime >= lowlimit and diftime <= highlimit:
+                        self.startProbe = 4
+                    else:
+                        self.startProbe = 0
+                    self.printer.lastProbetime = ctime
+                if res and not self.printer.lastProbe and self.startProbe==4:
+                    ctime = time.perf_counter()
+                    diftime = ctime - self.printer.lastProbetime
+                    #self.gcode.respond_info("2.get es:%s,diftime:%s" %(str(res),str(diftime)))
+                    if diftime >= lowlimit and diftime <= highlimit:
+                        self.startProbe = 5
+                    else:
+                        self.startProbe = 0
+                    self.printer.lastProbetime = ctime
+                if not res and self.printer.lastProbe and self.startProbe==5:
+                    ctime = time.perf_counter()
+                    diftime = ctime - self.printer.lastProbetime
+                    #self.gcode.respond_info("3.get es:%s,diftime:%s" %(str(res),str(diftime)))
+                    if diftime >= lowlimit and diftime <= highlimit:
+                        self.startProbe = 6
+                    else:
+                        self.startProbe = 0
+                    self.printer.lastProbetime = ctime
+                if res and not self.printer.lastProbe and self.startProbe==6:
+                    ctime = time.perf_counter()
+                    diftime = ctime - self.printer.lastProbetime
+                    #self.gcode.respond_info("2.get es:%s,diftime:%s" %(str(res),str(diftime)))
+                    if diftime >= lowlimit and diftime <= highlimit:
+                        self.startProbe = 7
+                    else:
+                        self.startProbe = 0
+                    self.printer.lastProbetime = ctime
+                if not res and self.printer.lastProbe and self.startProbe==7:
+                    ctime = time.perf_counter()
+                    diftime = ctime - self.printer.lastProbetime
+                    #self.gcode.respond_info("3.get es:%s,diftime:%s" %(str(res),str(diftime)))
+                    if diftime >= lowlimit and diftime <= highlimit:
+                        self.startProbe = 8
+                    else:
+                        self.startProbe = 0
+                    self.printer.lastProbetime = ctime
+                if res and not self.printer.lastProbe and self.startProbe==8:
+                    ctime = time.perf_counter()
+                    diftime = ctime - self.printer.lastProbetime
+                    #self.gcode.respond_info("4.get es:%s,diftime:%s" %(str(res),str(diftime)))
+                    if diftime >= lowlimit and diftime <= highlimit:
+                        self.printer.invoke_shutdown("Protection - MCU shutdown - Y offset going down / lost step or layer shift happened : <br> please don't keep touching the print head while printing , <br> check the x,y,z axis moving correct or not . check the filament stick on the conveyor belt correct or not . Please repower the printer .time:%s" % (str(diftime)))
+                        return self.printer.get_reactor().NEVER
+                    self.startProbe = 0
+                    self.printer.lastProbetime = ctime
+
+                self.printer.lastProbe = res
+            if self.counter > print_time1:
+                self.counter = print_time1
+            #print_time =self.printer.prtime - 0.493242188
+            if self.counter1 > print_time1:
+                self.counter1 = print_time1
+            if print_time1-self.counter>5:
+                #self.gcode.respond_info("Ebdiag:%s,mon:%s,head:%s,pt:%s,less:%s" %(str(currentEbdiag),str(print_time1),str(headertime),str(print_time),str(abstime)))
+                self.counter = print_time1
+
+
+        except self.printer.command_error as e:
+            self.gcode.respond_info("error:%s" %(str(e)))
+            self.printer.invoke_shutdown(str(e))
+            return self.printer.get_reactor().NEVER
+        return eventtime + .01
+
     def _handle_homing_move_begin(self, hmove):
         if self.mcu_probe in hmove.get_mcu_endstops():
             self.mcu_probe.probe_prepare(hmove)
@@ -186,6 +341,15 @@ class PrinterProbe:
             return self._calc_median(positions)
         return self._calc_mean(positions)
     cmd_PROBE_help = "Probe Z-height at current XY position"
+    
+    #add for cxm
+    cmd_SET_PROTECT_ON_help = "Sets the PROTECT on"
+    cmd_SET_PROTECT_OFF_help = "Sets the PROTECT off"
+    def cmd_SET_PROTECT_ON(self, gcmd):
+        self.printer.protection = True
+    def cmd_SET_PROTECT_OFF(self, gcmd):
+        self.printer.protection = False
+    
     def cmd_PROBE(self, gcmd):
         pos = self.run_probe(gcmd)
         gcmd.respond_info("Result is z=%.6f" % (pos[2],))
