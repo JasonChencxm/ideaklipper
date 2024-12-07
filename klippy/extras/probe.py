@@ -5,6 +5,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging
 import pins
+import time
 from . import manual_probe
 
 HINT_TIMEOUT = """
@@ -101,7 +102,7 @@ class PrinterProbe:
             self.multi_probe_pending = False
             self.mcu_probe.multi_probe_end()
     def setup_pin(self, pin_type, pin_params):
-        if pin_type != 'endstop' or pin_params['pin'] != 'z_virtual_endstop':
+        if pin_type != 'endstop' or pin_params['pin'] != 'y_virtual_endstop':
             raise pins.error("Probe virtual endstop only useful as endstop pin")
         if pin_params['invert'] or pin_params['pullup']:
             raise pins.error("Can not pullup/invert probe virtual endstop")
@@ -117,31 +118,25 @@ class PrinterProbe:
         curtime = self.printer.get_reactor().monotonic()
         if 'z' not in toolhead.get_status(curtime)['homed_axes']:
             raise self.printer.command_error("Must home before probe")
+        phoming = self.printer.lookup_object('homing')
         pos = toolhead.get_position()
-        pos[2] = self.z_position
+        pos[1] = self.z_position
         try:
-            epos = self.mcu_probe.probing_move(pos, speed)
+            epos = phoming.probing_move(self.mcu_probe, pos, speed)
         except self.printer.command_error as e:
             reason = str(e)
             if "Timeout during endstop homing" in reason:
                 reason += HINT_TIMEOUT
             raise self.printer.command_error(reason)
-        # get z compensation from axis_twist_compensation
-        axis_twist_compensation = self.printer.lookup_object(
-            'axis_twist_compensation', None)
-        z_compensation = 0
-        if axis_twist_compensation is not None:
-            z_compensation = (
-                axis_twist_compensation.get_z_compensation_value(pos))
-        # add z compensation to probe position
-        epos[2] += z_compensation
-        self.gcode.respond_info("probe at %.3f,%.3f is z=%.6f"
-                                % (epos[0], epos[1], epos[2]))
+        self.gcode.respond_info("probe at %.3f,%.3f is y=%.6f"
+                                % (epos[0], epos[2], epos[1]))
         return epos[:3]
     def _move(self, coord, speed):
         self.printer.lookup_object('toolhead').manual_move(coord, speed)
     def _calc_mean(self, positions):
         count = float(len(positions))
+        if count==0:
+            return [0,0,0]
         return [sum([pos[i] for pos in positions]) / count
                 for i in range(3)]
     def _calc_median(self, positions):
@@ -166,7 +161,7 @@ class PrinterProbe:
         must_notify_multi_probe = not self.multi_probe_pending
         if must_notify_multi_probe:
             self.multi_probe_begin()
-        probexy = self.printer.lookup_object('toolhead').get_position()[:2]
+        probexy = self.printer.lookup_object('toolhead').get_position()[:1]
         retries = 0
         positions = []
         while len(positions) < sample_count:
@@ -174,7 +169,7 @@ class PrinterProbe:
             pos = self._probe(speed)
             positions.append(pos)
             # Check samples tolerance
-            z_positions = [p[2] for p in positions]
+            z_positions = [p[1] for p in positions]
             if max(z_positions) - min(z_positions) > samples_tolerance:
                 if retries >= samples_retries:
                     raise gcmd.error("Probe samples exceed samples_tolerance")
@@ -183,7 +178,7 @@ class PrinterProbe:
                 positions = []
             # Retract
             if len(positions) < sample_count:
-                self._move(probexy + [pos[2] + sample_retract_dist], lift_speed)
+                self._move(probexy + [pos[1] + sample_retract_dist] + [pos[2]], lift_speed)
         if must_notify_multi_probe:
             self.multi_probe_end()
         # Calculate and return result
@@ -229,19 +224,19 @@ class PrinterProbe:
             pos = self._probe(speed)
             positions.append(pos)
             # Retract
-            liftpos = [None, None, pos[2] + sample_retract_dist]
+            liftpos = [None, pos[1] + sample_retract_dist, None]
             self._move(liftpos, lift_speed)
         self.multi_probe_end()
         # Calculate maximum, minimum and average values
-        max_value = max([p[2] for p in positions])
-        min_value = min([p[2] for p in positions])
+        max_value = max([p[1] for p in positions])
+        min_value = min([p[1] for p in positions])
         range_value = max_value - min_value
-        avg_value = self._calc_mean(positions)[2]
-        median = self._calc_median(positions)[2]
+        avg_value = self._calc_mean(positions)[1]
+        median = self._calc_median(positions)[1]
         # calculate the standard deviation
         deviation_sum = 0
         for i in range(len(positions)):
-            deviation_sum += pow(positions[i][2] - avg_value, 2.)
+            deviation_sum += pow(positions[i][1] - avg_value, 2.)
         sigma = (deviation_sum / len(positions)) ** 0.5
         # Show information
         gcmd.respond_info(
@@ -251,7 +246,7 @@ class PrinterProbe:
     def probe_calibrate_finalize(self, kin_pos):
         if kin_pos is None:
             return
-        z_offset = self.probe_calibrate_z - kin_pos[2]
+        z_offset = self.probe_calibrate_z - kin_pos[1]
         self.gcode.respond_info(
             "%s: z_offset: %.3f\n"
             "The SAVE_CONFIG command will update the printer config file\n"
@@ -265,8 +260,8 @@ class PrinterProbe:
         lift_speed = self.get_lift_speed(gcmd)
         curpos = self.run_probe(gcmd)
         # Move away from the bed
-        self.probe_calibrate_z = curpos[2]
-        curpos[2] += 5.
+        self.probe_calibrate_z = curpos[1]
+        curpos[1] += 5.
         self._move(curpos, lift_speed)
         # Move the nozzle over the probe point
         curpos[0] += self.x_offset
@@ -324,14 +319,14 @@ class ProbeEndstopWrapper:
         for stepper in kin.get_steppers():
             if stepper.is_active_axis('z'):
                 self.add_stepper(stepper)
-    def _raise_probe(self):
+    def raise_probe(self):
         toolhead = self.printer.lookup_object('toolhead')
         start_pos = toolhead.get_position()
         self.deactivate_gcode.run_gcode_from_command()
         if toolhead.get_position()[:3] != start_pos[:3]:
             raise self.printer.command_error(
                 "Toolhead moved during probe activate_gcode script")
-    def _lower_probe(self):
+    def lower_probe(self):
         toolhead = self.printer.lookup_object('toolhead')
         start_pos = toolhead.get_position()
         self.activate_gcode.run_gcode_from_command()
@@ -345,19 +340,16 @@ class ProbeEndstopWrapper:
     def multi_probe_end(self):
         if self.stow_on_each_sample:
             return
-        self._raise_probe()
+        self.raise_probe()
         self.multi = 'OFF'
-    def probing_move(self, pos, speed):
-        phoming = self.printer.lookup_object('homing')
-        return phoming.probing_move(self, pos, speed)
     def probe_prepare(self, hmove):
         if self.multi == 'OFF' or self.multi == 'FIRST':
-            self._lower_probe()
+            self.lower_probe()
             if self.multi == 'FIRST':
                 self.multi = 'ON'
     def probe_finish(self, hmove):
         if self.multi == 'OFF':
-            self._raise_probe()
+            self.raise_probe()
     def get_position_endstop(self):
         return self.position_endstop
 
@@ -400,7 +392,7 @@ class ProbePointsHelper:
         if not self.results:
             # Use full speed to first probe position
             speed = self.speed
-        toolhead.manual_move([None, None, self.horizontal_move_z], speed)
+        toolhead.manual_move([None, self.horizontal_move_z, None], speed)
         # Check if done probing
         if len(self.results) >= len(self.probe_points):
             toolhead.get_last_move_time()
@@ -433,7 +425,7 @@ class ProbePointsHelper:
         # Perform automatic probing
         self.lift_speed = probe.get_lift_speed(gcmd)
         self.probe_offsets = probe.get_offsets()
-        if self.horizontal_move_z < self.probe_offsets[2]:
+        if self.horizontal_move_z < self.probe_offsets[1]:
             raise gcmd.error("horizontal_move_z can't be less than"
                              " probe's z_offset")
         probe.multi_probe_begin()

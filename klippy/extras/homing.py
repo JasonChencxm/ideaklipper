@@ -138,6 +138,7 @@ class HomingMove:
             raise self.printer.command_error(error)
         return trigpos
     def check_no_movement(self):
+        return None
         if self.printer.get_start_args().get('debuginput') is not None:
             return None
         for sp in self.stepper_positions:

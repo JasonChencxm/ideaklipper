@@ -143,8 +143,6 @@ class PrinterConfig:
         self.printer = printer
         self.autosave = None
         self.deprecated = {}
-        self.runtime_warnings = []
-        self.deprecate_warnings = []
         self.status_raw_config = {}
         self.status_save_pending = {}
         self.status_settings = {}
@@ -174,16 +172,16 @@ class PrinterConfig:
             autosave_data = data[pos + len(AUTOSAVE_HEADER):].strip()
         # Check for errors and strip line prefixes
         if "\n#*# " in regular_data:
-            logging.warning("Can't read autosave from config file"
-                            " - autosave state corrupted")
+            logging.warn("Can't read autosave from config file"
+                         " - autosave state corrupted")
             return data, ""
         out = [""]
         for line in autosave_data.split('\n'):
             if ((not line.startswith("#*#")
                  or (len(line) >= 4 and not line.startswith("#*# ")))
                 and autosave_data):
-                logging.warning("Can't read autosave from config file"
-                                " - modifications after header")
+                logging.warn("Can't read autosave from config file"
+                             " - modifications after header")
                 return data, ""
             out.append(line[4:])
         out.append("")
@@ -191,12 +189,15 @@ class PrinterConfig:
     comment_r = re.compile('[#;].*$')
     value_r = re.compile('[^A-Za-z0-9_].*$')
     def _strip_duplicates(self, data, config):
+        fileconfig = config.fileconfig
         # Comment out fields in 'data' that are defined in 'config'
         lines = data.split('\n')
         section = None
         is_dup_field = False
         for lineno, line in enumerate(lines):
-            pruned_line = self.comment_r.sub('', line).rstrip()
+            pruned_line2 = line
+            pruned_line = self.comment_r.sub('', pruned_line2).rstrip()
+            
             if not pruned_line:
                 continue
             if pruned_line[0].isspace():
@@ -205,7 +206,7 @@ class PrinterConfig:
                 continue
             is_dup_field = False
             if pruned_line[0] == '[':
-                section = pruned_line[1:-1].strip()
+                section = pruned_line[1:-1].strip()      
                 continue
             field = self.value_r.sub('', pruned_line)
             if config.fileconfig.has_option(section, field):
@@ -218,10 +219,7 @@ class PrinterConfig:
         data = '\n'.join(buffer)
         del buffer[:]
         sbuffer = io.StringIO(data)
-        if sys.version_info.major >= 3:
-            fileconfig.read_file(sbuffer, filename)
-        else:
-            fileconfig.readfp(sbuffer, filename)
+        fileconfig.readfp(sbuffer, filename)
     def _resolve_include(self, source_filename, include_spec, fileconfig,
                          visited):
         dirname = os.path.dirname(source_filename)
@@ -315,11 +313,6 @@ class PrinterConfig:
                  "======================="]
         self.printer.set_rollover_info("config", "\n".join(lines))
     # Status reporting
-    def runtime_warning(self, msg):
-        logging.warn(msg)
-        res = {'type': 'runtime_warning', 'message': msg}
-        self.runtime_warnings.append(res)
-        self.status_warnings = self.runtime_warnings + self.deprecate_warnings
     def deprecate(self, section, option, value=None, msg=None):
         self.deprecated[(section, option, value)] = msg
     def _build_status(self, config):
@@ -331,7 +324,7 @@ class PrinterConfig:
         self.status_settings = {}
         for (section, option), value in config.access_tracking.items():
             self.status_settings.setdefault(section, {})[option] = value
-        self.deprecate_warnings = []
+        self.status_warnings = []
         for (section, option, value), msg in self.deprecated.items():
             if value is None:
                 res = {'type': 'deprecated_option'}
@@ -340,8 +333,7 @@ class PrinterConfig:
             res['message'] = msg
             res['section'] = section
             res['option'] = option
-            self.deprecate_warnings.append(res)
-        self.status_warnings = self.runtime_warnings + self.deprecate_warnings
+            self.status_warnings.append(res)
     def get_status(self, eventtime):
         return {'config': self.status_raw_config,
                 'settings': self.status_settings,
@@ -383,7 +375,7 @@ class PrinterConfig:
                 if config.fileconfig.has_option(section, option):
                     msg = ("SAVE_CONFIG section '%s' option '%s' conflicts "
                            "with included value" % (section, option))
-                    raise gcode.error(msg)
+                    #raise gcode.error(msg)
     cmd_SAVE_CONFIG_help = "Overwrite config file and restart"
     def cmd_SAVE_CONFIG(self, gcmd):
         if not self.autosave.fileconfig.sections():
@@ -391,11 +383,11 @@ class PrinterConfig:
         gcode = self.printer.lookup_object('gcode')
         # Create string containing autosave data
         autosave_data = self._build_config_string(self.autosave)
-        lines = [('#*# ' + l).strip()
+        lines = [l.strip()
                  for l in autosave_data.split('\n')]
-        lines.insert(0, "\n" + AUTOSAVE_HEADER.rstrip())
+        lines.insert(0, "\n")
         lines.append("")
-        autosave_data = '\n'.join(lines)
+        autosave_data = "\n".join(lines)
         # Read in and validate current config file
         cfgname = self.printer.get_start_args()['config_file']
         try:

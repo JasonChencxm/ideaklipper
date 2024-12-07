@@ -28,7 +28,7 @@ class RunoutHelper:
         # Internal state
         self.min_event_systime = self.reactor.NEVER
         self.filament_present = False
-        self.sensor_enabled = True
+        self.sensor_enabled = False
         # Register commands and event handlers
         self.printer.register_event_handler("klippy:ready", self._handle_ready)
         self.gcode.register_mux_command(
@@ -60,7 +60,7 @@ class RunoutHelper:
             logging.exception("Script running error")
         self.min_event_systime = self.reactor.monotonic() + self.event_delay
     def note_filament_present(self, is_filament_present):
-        if is_filament_present == self.filament_present:
+        if is_filament_present == self.filament_present and is_filament_present == 1:
             return
         self.filament_present = is_filament_present
         eventtime = self.reactor.monotonic()

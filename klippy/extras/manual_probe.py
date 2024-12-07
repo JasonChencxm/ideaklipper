@@ -14,8 +14,8 @@ class ManualProbe:
         self.gcode.register_command('MANUAL_PROBE', self.cmd_MANUAL_PROBE,
                                     desc=self.cmd_MANUAL_PROBE_help)
         # Endstop value for cartesian printers with separate Z axis
-        zconfig = config.getsection('stepper_z')
-        self.z_position_endstop = zconfig.getfloat('position_endstop', None,
+        zconfig = config.getsection('stepper_y')
+        self.y_position_endstop = zconfig.getfloat('position_endstop', None,
                                                    note_valid=False)
         # Endstop values for linear delta printers with vertical A,B,C towers
         a_tower_config = config.getsection('stepper_a')
@@ -32,7 +32,7 @@ class ManualProbe:
                                                           note_valid=False)
         # Conditionally register appropriate commands depending on printer
         # Cartestian printers with separate Z Axis
-        if self.z_position_endstop is not None:
+        if self.y_position_endstop is not None:
             self.gcode.register_command(
                 'Z_ENDSTOP_CALIBRATE', self.cmd_Z_ENDSTOP_CALIBRATE,
                 desc=self.cmd_Z_ENDSTOP_CALIBRATE_help)
@@ -49,7 +49,7 @@ class ManualProbe:
         self.reset_status()
     def manual_probe_finalize(self, kin_pos):
         if kin_pos is not None:
-            self.gcode.respond_info("Z position is %.3f" % (kin_pos[2],))
+            self.gcode.respond_info("Y position is %.3f" % (kin_pos[1],))
     def reset_status(self):
         self.status = {
             'is_active': False,
@@ -65,28 +65,28 @@ class ManualProbe:
     def z_endstop_finalize(self, kin_pos):
         if kin_pos is None:
             return
-        z_pos = self.z_position_endstop - kin_pos[2]
+        y_pos = self.y_position_endstop - kin_pos[1]
         self.gcode.respond_info(
-            "stepper_z: position_endstop: %.3f\n"
+            "stepper_y: position_endstop: %.3f\n"
             "The SAVE_CONFIG command will update the printer config file\n"
-            "with the above and restart the printer." % (z_pos,))
+            "with the above and restart the printer." % (y_pos,))
         configfile = self.printer.lookup_object('configfile')
-        configfile.set('stepper_z', 'position_endstop', "%.3f" % (z_pos,))
+        configfile.set('stepper_y', 'position_endstop', "%.3f" % (y_pos,))
     cmd_Z_ENDSTOP_CALIBRATE_help = "Calibrate a Z endstop"
     def cmd_Z_ENDSTOP_CALIBRATE(self, gcmd):
         ManualProbeHelper(self.printer, gcmd, self.z_endstop_finalize)
     def cmd_Z_OFFSET_APPLY_ENDSTOP(self,gcmd):
-        offset = self.gcode_move.get_status()['homing_origin'].z
+        offset = self.gcode_move.get_status()['homing_origin'].y
         configfile = self.printer.lookup_object('configfile')
         if offset == 0:
-            self.gcode.respond_info("Nothing to do: Z Offset is 0")
+            self.gcode.respond_info("Nothing to do: Y Offset is 0")
         else:
-            new_calibrate = self.z_position_endstop - offset
+            new_calibrate = self.y_position_endstop - offset
             self.gcode.respond_info(
-                "stepper_z: position_endstop: %.3f\n"
+                "stepper_y: position_endstop: %.3f\n"
                 "The SAVE_CONFIG command will update the printer config file\n"
                 "with the above and restart the printer." % (new_calibrate))
-            configfile.set('stepper_z', 'position_endstop',
+            configfile.set('stepper_y', 'position_endstop',
                 "%.3f" % (new_calibrate,))
     def cmd_Z_OFFSET_APPLY_DELTA_ENDSTOPS(self,gcmd):
         offset = self.gcode_move.get_status()['homing_origin'].z
@@ -120,7 +120,7 @@ def verify_no_manual_probe(printer):
         gcode.register_command('ACCEPT', 'dummy')
     except printer.config_error as e:
         raise gcode.error(
-            "Already in a manual Z probe. Use ABORT to abort it.")
+            "Already in a manual Y probe. Use ABORT to abort it.")
     gcode.register_command('ACCEPT', None)
 
 Z_BOB_MINIMUM = 0.500
@@ -147,7 +147,7 @@ class ManualProbeHelper:
         self.gcode.register_command('TESTZ', self.cmd_TESTZ,
                                     desc=self.cmd_TESTZ_help)
         self.gcode.respond_info(
-            "Starting manual Z probe. Use TESTZ to adjust position.\n"
+            "Starting manual Y probe. Use TESTZ to adjust position.\n"
             "Finish with ACCEPT or ABORT command.")
         self.start_position = self.toolhead.get_position()
         self.report_z_status()
@@ -167,16 +167,16 @@ class ManualProbeHelper:
         curpos = self.toolhead.get_position()
         try:
             z_bob_pos = z_pos + Z_BOB_MINIMUM
-            if curpos[2] < z_bob_pos:
-                self.toolhead.manual_move([None, None, z_bob_pos], self.speed)
-            self.toolhead.manual_move([None, None, z_pos], self.speed)
+            if curpos[1] < z_bob_pos:
+                self.toolhead.manual_move([None, z_bob_pos, None], self.speed)
+            self.toolhead.manual_move([None, z_pos, None], self.speed)
         except self.printer.command_error as e:
             self.finalize(False)
             raise
     def report_z_status(self, warn_no_change=False, prev_pos=None):
         # Get position
         kin_pos = self.get_kinematics_pos()
-        z_pos = kin_pos[2]
+        z_pos = kin_pos[1]
         if warn_no_change and z_pos == prev_pos:
             self.gcode.respond_info(
                 "WARNING: No change in position (reached stepper resolution)")
@@ -207,7 +207,7 @@ class ManualProbeHelper:
     def cmd_ACCEPT(self, gcmd):
         pos = self.toolhead.get_position()
         start_pos = self.start_position
-        if pos[:2] != start_pos[:2] or pos[2] >= start_pos[2]:
+        if (pos[0] != start_pos[0] and pos[2] != start_pos[2] ) or pos[1] >= start_pos[1]:
             gcmd.respond_info(
                 "Manual probe failed! Use TESTZ commands to position the\n"
                 "nozzle prior to running ACCEPT.")
@@ -221,7 +221,7 @@ class ManualProbeHelper:
     def cmd_TESTZ(self, gcmd):
         # Store current position for later reference
         kin_pos = self.get_kinematics_pos()
-        z_pos = kin_pos[2]
+        z_pos = kin_pos[1]
         pp = self.past_positions
         insert_pos = bisect.bisect_left(pp, z_pos)
         if insert_pos >= len(pp) or pp[insert_pos] != z_pos:
